@@ -33,16 +33,8 @@ const DENS=[
 {id:"N1",name:"極簡留白",lv:-2,tags:T({dense:-2,lux:1})},{id:"N2",name:"平衡",lv:-1,tags:T({dense:0})},
 {id:"N3",name:"雜誌感",lv:1,tags:T({dense:1,serif:1,structure:1})},{id:"N4",name:"資訊密集",lv:2,tags:T({dense:2,tech:1})}];
 const TEX=[];
-[["radius","圓角",["0px 直角","6px 微圓","14px 圓潤","28px 膠囊"],[0,6,14,28]],
- ["shadow","陰影",["無陰影","細微陰影","柔和浮起","硬邊位移"],["none","0 1px 3px rgba(0,0,0,.12)","0 12px 30px rgba(0,0,0,.16)","6px 6px 0 #111"]],
- ["line","線條",["無邊框","髮絲線","粗實線","虛線"],["none","1px solid #d4d4d8","3px solid #111","2px dashed #888"]],
- ["gradient","漸層",["純色","同色微漸層","雙色漸層","極光網格"],["#4f46e5","linear-gradient(180deg,#5b54ec,#4338ca)","linear-gradient(135deg,#06b6d4,#a855f7)","radial-gradient(at 20% 20%,#7cf5c4,transparent 50%),radial-gradient(at 80% 30%,#a78bfa,transparent 50%),radial-gradient(at 50% 90%,#f472b6,transparent 50%),#0b1020"]]
-].forEach(([k,zh,names,vals])=>names.forEach((n,i)=>{const t={};
- if(k=="radius")Object.assign(t,{radius:[-2,-1,1,2][i],play:i==3?1:0,structure:i==0?1:0});
- if(k=="shadow")Object.assign(t,{depth:[-2,0,2,1][i],bold:i==3?2:0,lux:i==2?1:0});
- if(k=="line")Object.assign(t,{structure:[-1,1,2,0][i],contrast:i==2?2:0,retro:i==3?1:0});
- if(k=="gradient")Object.assign(t,{sat:[0,0,2,2][i],tech:i==3?2:0,lux:i==1?1:0,play:i==2?1:0,structure:i==0?1:0});
- TEX.push({id:"X"+(TEX.length+1),aspect:k,aspectZh:zh,name:zh+"・"+n,val:vals[i],lv:i,tags:T(t)});}));
+DETAIL_PRESETS.forEach(p=>TEX.push({id:"X"+(TEX.length+1),aspect:"detail",aspectZh:"細節組合",name:p.name,k:p.k,r:p.r,sh:p.sh,ln:p.ln,val:p.r,lv:0,tags:T(p.tags)}));
+[["純色","#4f46e5",{structure:1}],["同色微漸層","linear-gradient(180deg,#5b54ec,#4338ca)",{lux:1}],["雙色漸層","linear-gradient(135deg,#06b6d4,#a855f7)",{sat:2,play:1}]].forEach(([n,v,t],i)=>TEX.push({id:"X"+(TEX.length+1),aspect:"gradient",aspectZh:"漸層",name:"漸層・"+n,val:v,lv:i,tags:T(t)}));
 const SLIDES=[
 ["標題封面","Title Slide","center",T({dense:-2,bold:1})],["問題陳述","Problem Statement","left",T({contrast:1,bold:1})],
 ["大數字","Big Number / Metric","metric",T({bold:2,dense:-1,tech:1})],["三欄重點","Three Column","cols3",T({structure:2,dense:1})],

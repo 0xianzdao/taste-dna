@@ -1,19 +1,24 @@
 "use strict";
 const $=s=>document.querySelector(s), app=()=>$("#app");
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
-const KEY="tasteDNA.v1";
+const KEY="tasteDNA.v3";
+// ---------- lazy fonts: only Noto Sans TC ships with first paint; other families load when something on screen uses them
+const FONTMAP={"Noto Sans TC":"noto-sans-tc","Noto Serif TC":"noto-serif-tc","JetBrains Mono":"jetbrains-mono","LXGW WenKai TC":"lxgw-wenkai-tc","Playfair Display":"playfair-display","Inter":"inter","Space Mono":"space-mono","EB Garamond":"eb-garamond","Lato":"lato","Chakra Petch":"chakra-petch","Crimson Pro":"crimson-pro","Baloo 2":"baloo-2","Comic Neue":"comic-neue","Barlow Condensed":"barlow-condensed","Barlow":"barlow","Public Sans":"public-sans","Plus Jakarta Sans":"plus-jakarta-sans","IBM Plex Sans":"ibm-plex-sans","Karla":"karla","Be Vietnam Pro":"be-vietnam-pro","Atkinson Hyperlegible":"atkinson-hyperlegible","Noto Sans":"noto-sans","Russo One":"russo-one","Lexend Mega":"lexend-mega","Playfair Display SC":"playfair-display-sc","Noto Sans Mono":"noto-sans-mono"};
+const fontLinks={};
+function ensureFont(f){const slug=FONTMAP[f];if(!slug)return Promise.resolve();if(!fontLinks[f])fontLinks[f]=new Promise(res=>{const l=document.createElement("link");l.rel="stylesheet";l.href="fonts/fam/"+slug+".css";l.onload=l.onerror=()=>res();document.head.appendChild(l)});return fontLinks[f]}
+function ensureFontsIn(html){const out=[];(String(html).match(/(?:'|&#39;|&quot;|")([A-Z][A-Za-z0-9 ]+?)(?:'|&#39;|&quot;|")/g)||[]).forEach(q=>{const f=q.replace(/^(?:'|&#39;|&quot;|")|(?:'|&#39;|&quot;|")$/g,"");if(FONTMAP[f])out.push(ensureFont(f))});return Promise.all(out)}
 let S=JSON.parse(localStorage.getItem(KEY)||"null")||{step:"intro",q:{uses:[],feel:null,mode:null,dens:null,least:null},votes:{},seen:{},nope:[],cat:0};
 const save=()=>localStorage.setItem(KEY,JSON.stringify(S));
 const fam=(name,g)=>`'${name.replace(/ Black$/,"")}',${F[g]||F.sans}`;
 // ---------- categories
 const CATS=[
- {k:"vibe",zh:"整體氣質",hint:"先抓大方向：哪種畫面讓你想多看一眼？",items:VIBES,n:12},
- {k:"pal",zh:"配色",hint:"只看顏色感覺，不用管它原本給什麼產業用。",items:GEN.pal,n:12},
- {k:"font",zh:"字體搭配",hint:"字體就是說話的口氣。",items:GEN.fonts,n:12},
+ {k:"vibe",zh:"整體氣質",hint:"先抓大方向：哪種畫面讓你想多看一眼？",items:VIBES,n:8,min:4},
+ {k:"pal",zh:"配色",hint:"只看顏色感覺，不用管它原本給什麼產業用。",items:GEN.pal,n:8,min:4},
+ {k:"font",zh:"字體搭配",hint:"字體就是說話的口氣。",items:GEN.fonts,n:7,min:3},
  {k:"dens",zh:"版面密度",hint:"同一份內容，你喜歡怎麼排？",items:DENS,n:4},
- {k:"tex",zh:"細節質感",hint:"圓角、陰影、線條、漸層：最容易露出 AI 味的地方。",items:TEX,n:16},
- {k:"slide",zh:"簡報版型",hint:"你會想用哪些版型？",items:SLIDES,n:10,need:"簡報"},
- {k:"social",zh:"社群圖文",hint:"你會想發哪種貼文？",items:SOCIAL,n:10,need:"社群圖"},
+ {k:"tex",zh:"細節質感",hint:"圓角、陰影、線條是一整組：挑看起來最順眼的搭配。",items:TEX,n:8},
+ {k:"slide",zh:"簡報版型",hint:"你會想用哪些版型？",items:SLIDES,n:6,need:"簡報"},
+ {k:"social",zh:"社群圖文",hint:"你會想發哪種貼文？",items:SOCIAL,n:6,need:"社群圖"},
  {k:"web",zh:"網頁與介面",soon:1,need:"網頁"},{k:"img",zh:"圖像風格",soon:1,need:"生圖"},{k:"motion",zh:"動態與影片",soon:1,need:"影片"}];
 const activeCats=()=>CATS.filter(c=>!c.soon&&(!c.need||S.q.uses.includes(c.need)));
 const byId={};CATS.forEach(c=>(c.items||[]).forEach(it=>{it.cat=c.k;byId[it.id]=it}));
@@ -27,19 +32,32 @@ function vec(){const v=DIMS.map(()=>0);const add=(t,w)=>t.forEach((x,i)=>v[i]+=x
 const dot=(a,b)=>a.reduce((s,x,i)=>s+x*b[i],0), norm=a=>Math.sqrt(dot(a,a))||1;
 const cos=(a,b)=>dot(a,b)/norm(a)/norm(b);
 function nextCard(c){const seen=S.seen[c.k]||[];if(seen.length>=Math.min(c.n,c.items.length))return null;
- const pool=c.items.filter(i=>!seen.includes(i.id));if(c.k=="dens"||c.k=="tex")return pool[0];
- const v=vec(),contrast=seen.length%4==3;pool.sort((a,b)=>contrast?dot(v,a.tags)-dot(v,b.tags):dot(v,b.tags)-dot(v,a.tags));return pool[0]}
+ const pool=c.items.filter(i=>!seen.includes(i.id));if(c.k=="dens")return pool[0];
+ const v=vec(),strong=norm(v)>1.5,byCos=pool.slice().sort((a,b)=>cos(v,b.tags)-cos(v,a.tags));
+ // every 4th card is a contrast card, but only if a genuinely opposite card exists (cos <= -0.15)
+ if(strong&&seen.length%4==3){const opp=byCos[byCos.length-1];if(cos(v,opp.tags)<=-0.15){opp._contrast=1;return opp}}
+ return byCos[0]}
 // ---------- theme from current picks
 function best(cat,fallback){const c=CATS.find(x=>x.k==cat),v=vec();const liked=c.items.filter(i=>S.votes[i.id]==1);
- const pool=liked.length?liked:(fallback?c.items.filter(i=>S.votes[i.id]!=-1):[]);if(!pool.length)return null;
+ let pool=liked.length?liked:(fallback?c.items.filter(i=>S.votes[i.id]!=-1):[]);const okp=pool.filter(i=>!nopeBlocks(i));if(okp.length)pool=okp;else if(!liked.length&&fallback){const any=c.items.filter(i=>!nopeBlocks(i));if(any.length)pool=any}if(!pool.length)return null;
  return pool.slice().sort((a,b)=>dot(v,b.tags)-dot(v,a.tags))[0]}
-function texLv(aspect){const v=vec();const l=TEX.filter(t=>t.aspect==aspect&&S.votes[t.id]==1);
+function texLv(aspect){const v=vec();const allowed=TEX.filter(t=>t.aspect==aspect&&!nopeBlocks(t));const l=allowed.filter(t=>S.votes[t.id]==1);
  if(l.length)return l.sort((a,b)=>dot(v,b.tags)-dot(v,a.tags))[0];
- const ok=TEX.filter(t=>t.aspect==aspect&&S.votes[t.id]!=-1);return (ok.length?ok:TEX.filter(t=>t.aspect==aspect)).sort((a,b)=>dot(v,b.tags)-dot(v,a.tags))[0]}
-function theme(){const p=best("pal",1),f=best("font",1);const dark=S.q.mode=="暗";
+ const ok=allowed.filter(t=>S.votes[t.id]!=-1);return (ok.length?ok:allowed.length?allowed:TEX.filter(t=>t.aspect==aspect)).sort((a,b)=>dot(v,b.tags)-dot(v,a.tags))[0]}
+const isPurple=h=>{h=hx6(h);const r=parseInt(h.substr(0,2),16),g=parseInt(h.substr(2,2),16),b=parseInt(h.substr(4,2),16);return b>150&&r>70&&g<120&&b>r}
+// does an item clash with the user's own dislikes list?
+function nopeBlocks(it){const n=S.nope||[];
+ if(it.aspect){if(it.aspect=="gradient"&&n.includes("ai-purple")&&it.lv>=2)return true;if(it.k=="pill"&&n.includes("same-radius"))return true;return false}
+ if(it.cat=="pal"){const c=it.c;if(n.includes("ai-purple")&&isPurple(c[2]))return true;if(n.includes("pure-black")&&c.some(x=>/^#0{6}$/i.test(x))&&c.some(x=>/^#f{6}$/i.test(x)))return true;
+  if(n.includes("beige-brass")&&lumi(c[0])>.85&&parseInt(hx6(c[0]).substr(4,2),16)<235&&it.tags[9]>0)return true}
+ if(it.cat=="font"){if(n.includes("inter-only")&&it.h=="Inter"&&it.b=="Inter")return true;if(n.includes("llm-serif")&&/Fraunces|Instrument Serif/.test(it.h))return true}
+ if(it.cat=="vibe"){if(n.includes("glass-everywhere")&&it.id=="V03")return true;if(n.includes("ai-purple")&&it.id=="V06")return true}
+ return false}
+function theme(){const p=best("pal",1),f=best("font",1);const dark=S.q.mode=="暗";const dt=texLv("detail");
  let [bg,fg,pr,se,ac]=p.c; if(dark&&lumi(bg)>.5){[bg,fg]=["#0e0f12","#f1f1f3"]}
  if(cr(pr,bg)<3){const alt=[ac,se,fg].sort((x,y)=>cr(y,bg)-cr(x,bg))[0];[pr,ac]=[alt,pr]}if(cr(fg,bg)<7)fg=lumi(bg)<.5?"#F4F4F5":"#18181B";
- return {bg,fg,pr,se,ac,hf:fam(f.h,f.hg),bf:fam(f.b,f.bg),font:f,pal:p,r:texLv("radius").val,sh:texLv("shadow").val,ln:texLv("line").val,gr:texLv("gradient"),dens:(DENS.find(d=>S.votes[d.id]==1)||DENS.find(d=>d.id==S.q.dens)||DENS[1])}}
+ const ink=c=>lumi(bg)<.5?String(c).replace(/#111\b|#18181b/g,fg).replace(/#d4d4d8|#e4e4e7/g,"rgba(255,255,255,.14)"):c;
+ return {bg,fg,pr,se,ac,hf:fam(f.h,f.hg),bf:fam(f.b,f.bg),font:f,pal:p,detail:dt,r:dt.r,sh:ink(dt.sh),ln:ink(dt.ln),gr:texLv("gradient"),dens:(DENS.find(d=>S.votes[d.id]==1)||DENS.find(d=>d.id==S.q.dens)||DENS[1])}}
 function hx6(h){h=h.replace("#","");return h.length==3?h.split("").map(c=>c+c).join(""):h}
 function rl(h){h=hx6(h);return .2126*ch(h,0)+.7152*ch(h,2)+.0722*ch(h,4)}function ch(h,i){const c=parseInt(h.substr(i,2),16)/255;return c<=.03928?c/12.92:Math.pow((c+.055)/1.055,2.4)}
 function cr(a,b){const x=rl(a),y=rl(b);return (Math.max(x,y)+.05)/(Math.min(x,y)+.05)}
@@ -70,14 +88,12 @@ function pvDens(d){const t=NEUTRAL,n=[1,3,4,8][d.lv<0?d.lv+2:d.lv+1];const items
  return `<div class="pv" style="background:${t.bg};color:${t.fg};font-family:${t.bf}"><div class="pv-in d-${d.id}">
  <div class="d-h" style="font-family:${d.id=='N3'?F.serif:t.hf}">${d.id=="N1"?"只講<br>一件事":"內容規劃"}</div>${d.id=="N1"?`<p class="d-sub">把最重要的訊息放大，其餘都留白。</p>`:""}
  <div class="d-g">${items.map((x,i)=>`<div class="d-c"><b style="color:${t.pr}">0${i+1}</b>${x}${d.lv>=1?`<small>重點說明與補充文字，讓資訊更完整。</small>`:""}</div>`).join("")}</div></div></div>`}
-function pvTex(x){const base=`background:#fff;border-radius:10px;box-shadow:0 1px 2px rgba(0,0,0,.06);border:1px solid #e7e5e4`;let card=base,btn="background:#18181b;color:#fff;border-radius:8px";
- if(x.aspect=="radius"){card=`background:#fff;border-radius:${x.val}px;border:1px solid #e4e4e7`;btn=`background:#18181b;color:#fff;border-radius:${x.val}px`}
- if(x.aspect=="shadow"){card=`background:#fff;border-radius:10px;box-shadow:${x.val};${x.lv==3?'border:2px solid #111':''}`}
- if(x.aspect=="line"){card=`background:#fff;border-radius:6px;border:${x.val}`;btn=`background:#fff;color:#111;border:${x.val=='none'?'1px solid transparent':x.val};border-radius:6px`}
- if(x.aspect=="gradient"){btn=`background:${x.lv==3?"#0b1020":x.val};color:#fff;border-radius:8px`;card=`background:${x.val};color:#fff;border-radius:12px`}
- return `<div class="pv" style="background:${x.aspect=='shadow'?'#f1f0ee':'#f7f6f3'};color:#18181b;font-family:${F.sans}"><div class="pv-in t-in">
+function pvTex(x){let card=`background:#fff;border-radius:10px;box-shadow:0 1px 2px rgba(0,0,0,.06);border:1px solid #e7e5e4`,btn="background:#18181b;color:#fff;border-radius:8px",chipR=999,chip=x.aspectZh;
+ if(x.aspect=="detail"){card=`background:#fff;border-radius:${x.r}px;box-shadow:${x.sh};border:${x.ln}`;btn=`background:#18181b;color:#fff;border-radius:${x.r}px;box-shadow:${/ 0 #/.test(x.sh)?x.sh:"none"};border:${x.ln=="none"?"0":x.ln}`;chipR=x.r;chip=`${x.r}px・${x.sh=="none"?"無陰影":/ 0 #/.test(x.sh)?"硬邊陰影":"柔和陰影"}・${x.ln=="none"?"無框":x.ln.split(" ")[0]+" 線"}`}
+ if(x.aspect=="gradient"){btn=`background:${x.val};color:#fff;border-radius:8px`;card=`background:${x.val};color:#fff;border-radius:12px`}
+ return `<div class="pv" style="background:#f1f0ee;color:#18181b;font-family:${F.sans}"><div class="pv-in t-in">
  <div class="t-card" style="${card}"><b>每月報告</b><span>營收成長 24%</span></div>
- <div class="t-row"><span class="t-btn" style="${btn}">確認</span><span class="t-chip" style="border-radius:${x.aspect=='radius'?x.val:999}px">${esc(x.aspectZh)}</span></div></div></div>`}
+ <div class="t-row"><span class="t-btn" style="${btn}">確認</span><span class="t-chip" style="border-radius:${chipR}px">${esc(chip)}</span></div></div></div>`}
 function pvSlide(s,t=NEUTRAL){const H=`font-family:${t.hf}`,acc=t.pr;const L={
  center:`<div class="s-c"><small style="color:${acc}">2026 Q4</small><h3 style="${H}">年度品牌策略</h3><p>從定位到內容的完整藍圖</p></div>`,
  left:`<div class="s-l"><small style="color:${acc}">問題</small><h3 style="${H}">八成的貼文<br>沒人看完</h3><p>不是內容不好，是第一眼沒抓住人。</p></div>`,
@@ -110,18 +126,18 @@ function preview(it,t){return {vibe:pvVibe,pal:pvPal,font:pvFont,dens:pvDens,tex
 const label=it=>it.zh||it.name;
 const sub=it=>({vibe:"風格原型："+it.src,pal:it.src,font:it.cjk?"中文字體搭配":esc(it.h)+" ＋ "+esc(it.b),dens:"版面密度",tex:"細節質感・"+it.aspectZh,slide:SLIDESUB[it.lay],social:SOCSUB[it.lay]})[it.cat];
 // ---------- screens
-function shell(inner,progress){app().innerHTML=`<header class="top"><a class="logo" href="#" onclick="go('intro');return false">審美 DNA</a>${progress!=null?`<div class="bar"><i style="width:${progress}%"></i></div>`:""}<button class="ghost sm" onclick="resetAll()">重新開始</button></header><main>${inner}</main>${footer()}`;window.scrollTo(0,0)}
+function shell(inner,progress){app().innerHTML=`<header class="top"><a class="logo" href="#" onclick="go('intro');return false">審美 DNA</a>${progress!=null?`<div class="bar"><i style="width:${progress}%"></i></div>`:""}<button class="ghost sm" onclick="resetAll()">重新開始</button></header><main>${inner}</main>${footer()}`;if(S.step!="intro")ensureFontsIn(app().innerHTML);window.scrollTo(0,0)}
 function footer(){return `<footer><a href="https://0xianzdao.github.io/taste-dna/">0xianzdao.github.io/taste-dna</a>（預覽版）・資料來源（MIT）：<a href="https://github.com/nextlevelbuilder/ui-ux-pro-max-skill">ui-ux-pro-max-skill</a>・<a href="https://github.com/Leonxlnx/taste-skill">taste-skill</a>・<a href="https://github.com/VoltAgent/awesome-design-md">awesome-design-md</a>。整理、繁中化與介面設計：@0xianzdao。文中提及的品牌名稱均屬各自所有者，僅作為設計風格的描述參考，與本工具無任何關聯或背書。所有選擇只存在你的瀏覽器，不上傳、不需登入。</footer>`}
-function go(s){S.step=s;save();render()}
+function go(s){if(s!="intro"){ensureFont("Noto Sans TC");FONTMAP["Noto Sans TC 900"]="noto-sans-tc-900";ensureFont("Noto Sans TC 900")}S.step=s;save();render()}
 function resetAll(){if(confirm("要清除所有選擇、重新開始嗎？")){localStorage.removeItem(KEY);location.reload()}}
 const QS=[
  {k:"uses",t:"你最常叫 AI 做什麼？",d:"可複選，決定之後要挑哪些成品類型。",multi:1,opts:["簡報","社群圖","網頁","生圖","影片"]},
  {k:"feel",t:"你希望作品給人什麼感覺？",d:"最多選兩個。",multi:2,opts:Object.keys(QUIZ_FEEL)},
  {k:"mode",t:"亮色還是暗色？",opts:["亮","暗","都可以"]},
  {k:"dens",t:"你喜歡畫面空一點，還是滿一點？",vis:DENS},
- {k:"least",t:"哪一張「最不像你」？",d:"選中的風格會直接放進地雷清單。",vis:EXTREMES}];
+ {k:"least",t:"這四種裡，哪一種你最不想用在自己的作品上？",d:"憑直覺選一張就好，不用全部看懂。選中的那種風格會列進你的地雷清單，之後也會少推類似的卡片。",vis:EXTREMES}];
 function render(){const st=S.step;
- if(st=="intro")return shell(`<section class="hero"><p class="eyebrow">7 分鐘・免費・不用登入</p><h1>找到你的<br><em>審美 DNA</em></h1><p class="lead">看圖、按喜歡或不要。系統會越選越懂你，最後給你一份白話審美報告、一張分享圖，加上一份貼給 AI 就能用的 DESIGN.md。</p><button class="primary" onclick="go('q0')">開始測驗</button><div class="hero-cards">${["V12","V02","V07"].map(id=>`<div class="hc">${preview(byId[id])}</div>`).join("")}</div></section>`);
+ if(st=="intro")return shell(`<section class="hero"><p class="eyebrow">約 4 分鐘・免費・不用登入</p><h1>找到你的<br><em>審美 DNA</em></h1><p class="lead">看圖、按喜歡或不要。系統會越選越懂你，最後給你一份白話審美報告、一張分享圖，加上一份貼給 AI 就能用的 DESIGN.md。</p><button class="primary" onclick="go('q0')">開始測驗</button><div class="hero-cards">${["V01","V02","V07"].map(id=>`<div class="hc">${preview(byId[id])}</div>`).join("")}</div></section>`);
  if(st[0]=="q"){const i=+st.slice(1),q=QS[i];const val=S.q[q.k];
   const opts=q.vis?`<div class="vgrid">${q.vis.map(o=>{const it=o.vibe?byId[o.vibe]:o;return `<button class="vopt ${val==o.id?"sel":""}" onclick="pickQ('${q.k}','${o.id}')"><div class="pvw">${preview(it)}</div><span>${o.name}</span></button>`}).join("")}</div>`
   :`<div class="chips">${q.opts.map(o=>{const sel=q.multi?(val||[]).includes(o):val==o;return `<button class="chip ${sel?"sel":""}" onclick="pickQ('${q.k}','${o}')">${o}</button>`}).join("")}</div>`;
@@ -139,11 +155,12 @@ function renderPick(){const cats=activeCats();let ci=S.cat;
  const soon=CATS.filter(x=>x.soon&&S.q.uses.includes(x.need));
  const t=(c.k=="slide"||c.k=="social")?theme():undefined;
  shell(`<section class="pick"><div class="tabs">${cats.map((x,i)=>`<span class="${i==ci?"on":i<ci?"done":""}">${x.zh}</span>`).join("")}${soon.map(x=>`<span class="soon">${x.zh}・即將推出</span>`).join("")}</div>
- <p class="eyebrow">${c.zh}　${seen+1} / ${tot}</p><p class="muted">${c.hint}</p>
+ <p class="eyebrow">${c.zh}　${seen+1} / ${tot}${it._contrast?"　・換個口味：這張跟你目前的偏好相反":""}</p><p class="muted">${c.hint}</p>
  <div class="stage"><div class="big">${preview(it,t)}</div><div class="cap"><b>${esc(label(it))}</b><small>${esc(sub(it))}</small></div></div>
  <div class="vote"><button class="no" onclick="vote('${it.id}',-1)" aria-label="不要">✕<span>不要</span></button><button class="skip" onclick="vote('${it.id}',0)">略過</button><button class="yes" onclick="vote('${it.id}',1)" aria-label="喜歡">♥<span>喜歡</span></button></div>
- <p class="keys">鍵盤：← 不要　↓ 略過　→ 喜歡</p></section>`,10+done/all*80)}
-function vote(id,v){const it=byId[id];S.votes[id]=v;(S.seen[it.cat]=S.seen[it.cat]||[]).push(id);save();render()}
+ <p class="keys">鍵盤：← 不要　↓ 略過　→ 喜歡</p>${minDone()?`<div class="nav"><button class="ghost" id="seenow" onclick="go('nope')">夠了，直接看結果 →</button></div>`:""}</section>`,10+done/all*80)}
+function minDone(){return activeCats().filter(c=>c.min).every(c=>(S.seen[c.k]||[]).length>=c.min)}
+function vote(id,v){const it=byId[id];delete it._contrast;S.votes[id]=v;(S.seen[it.cat]=S.seen[it.cat]||[]).push(id);save();render()}
 document.addEventListener("keydown",e=>{if(S.step!="pick")return;const b={ArrowLeft:".no",ArrowRight:".yes",ArrowDown:".skip"}[e.key];if(b){e.preventDefault();$(b)&&$(b).click()}});
 function renderNope(){shell(`<section class="nope"><p class="eyebrow">最後一步</p><h2>你最受不了哪些 AI 套版感？</h2><p class="muted">整理自 taste-skill 的反模板規則。勾越多，AI 越知道要避開什麼。</p><div class="nl">${NOPE.map(([k,t])=>`<label class="${S.nope.includes(k)?"sel":""}"><input type="checkbox" ${S.nope.includes(k)?"checked":""} onchange="tg('${k}')"><span>${t}</span></label>`).join("")}</div><div class="nav"><button class="ghost" onclick="S.cat=0;go('pick')">回去挑選</button><button class="primary" onclick="go('result')">看我的審美 DNA</button></div></section>`,95)}
 function tg(k){S.nope=S.nope.includes(k)?S.nope.filter(x=>x!=k):[...S.nope,k];save();renderNope()}
@@ -151,15 +168,19 @@ function tg(k){S.nope=S.nope.includes(k)?S.nope.filter(x=>x!=k):[...S.nope,k];sa
 function dna(){const v=vec(),t=theme();const KW_W={bright:.6,tech:.8,contrast:.8,sat:.9};const order=DIMS.map((d,i)=>[d,v[i]]).sort((a,b)=>Math.abs(b[1])*(KW_W[b[0]]||1)-Math.abs(a[1])*(KW_W[a[0]]||1));
  const kw=order.slice(0,3).map(([d,x])=>DZH[d][x>=0?0:1]);
  const vibes=VIBES.filter(x=>S.votes[x.id]==1).sort((a,b)=>dot(v,b.tags)-dot(v,a.tags)).slice(0,3);
- const vb=vibes.length?vibes:[VIBES.slice().sort((a,b)=>dot(v,b.tags)-dot(v,a.tags))[0]];
+ const bgHex=x=>(String(x.bg).match(/#[0-9a-f]{3,6}/i)||["#fff"])[0],darkBg=lumi(t.bg)<.5,fit=x=>(lumi(bgHex(x))<.5)==darkBg,leastV=S.q.least&&EXTREMES.find(e=>e.id==S.q.least).vibe;
+ const vibesFit=vibes.filter(fit);
+ const vb=vibesFit.length?vibesFit:[VIBES.filter(x=>fit(x)&&S.votes[x.id]!=-1&&!nopeBlocks(x)&&x.id!=leastV).sort((a,b)=>dot(v,b.tags)-dot(v,a.tags))[0]||VIBES[0]];
  const brands=GEN.brands.map(b=>[b,cos(v,b.tags)+(BRAND_FIX[b.name]?.08:0)+(S.q.mode=="暗"&&lumi(b.c[0])<.3?.15:0)]).sort((a,b)=>b[1]-a[1]).slice(0,3).map(x=>x[0]);
  const dislikedV=VIBES.filter(x=>S.votes[x.id]==-1).map(x=>x.name);const ext=S.q.least&&byId[EXTREMES.find(e=>e.id==S.q.least).vibe].name;
  if(ext&&!dislikedV.includes(ext))dislikedV.unshift(ext);
  const nopes=NOPE.filter(n=>S.nope.includes(n[0])).map(n=>n[1]);
+ const avoidVibes=VIBES.filter(x=>S.votes[x.id]==-1||x.id==leastV);
+ const avoidTerms=[...avoidVibes.map(x=>x.name.replace(/ .*/,"")),...(S.nope.includes("glass-everywhere")?["毛玻璃"]:[]),...(S.nope.includes("ai-purple")?["紫藍漸層"]:[]),...SLIDES.filter(x=>S.votes[x.id]==-1).map(x=>x.name),...SOCIAL.filter(x=>S.votes[x.id]==-1).map(x=>x.name)];
  const slides=SLIDES.filter(s=>S.votes[s.id]==1),socials=SOCIAL.filter(s=>S.votes[s.id]==1);
  const name=kw[0]+"・"+vb[0].name;
  const sum=`你喜歡${kw[0]}、${kw[1]}的畫面，整體偏向「${vb.map(x=>x.name).join("、")}」，再帶一點${kw[2]}；配色以「${t.pal.zh}」為底，用「${t.font.zh}」說話。`;
- return {v,t,kw,vb,brands,dislikedV,nopes,slides,socials,name,sum}}
+ return {v,t,kw,vb,brands,dislikedV,nopes,slides,socials,name,sum,avoidVibes,avoidTerms}}
 function renderResult(){const d=dna(),t=d.t;const css=`--onpr:${on(t.pr)};--bg:${t.bg};--fg:${t.fg};--pr:${t.pr};--se:${t.se};--ac:${t.ac};--hf:${t.hf};--bf:${t.bf};--r:${t.r}px;--sh:${t.sh};--ln:${t.ln};--gr:${t.gr.lv&&t.gr.lv<3?t.gr.val.replace(/#4f46e5|#5b54ec|#4338ca/g,t.pr):t.pr}`;
  shell(`<section class="result"><p class="eyebrow">你的審美 DNA</p><h1 class="rname">${esc(d.name)}</h1><p class="sum">${esc(d.sum)}</p><div class="kws">${d.kw.map(k=>`<span>#${k}</span>`).join("")}</div>
  <div class="rgrid"><div class="rc"><h3>配色</h3><div class="sw">${t.pal.c.map((c,i)=>`<div><i style="background:${c}"></i><small>${["背景","文字","主色","輔色","強調"][i]}<br>${c.toUpperCase()}</small></div>`).join("")}</div><p class="muted">${esc(t.pal.zh)}</p></div>
@@ -173,59 +194,80 @@ function renderResult(){const d=dna(),t=d.t;const css=`--onpr:${on(t.pr)};--bg:$
  <h2 class="sec">帶走你的 DNA</h2><div class="acts"><button class="primary" onclick="copyMd('design')">複製 DESIGN.md</button><button onclick="dl('design')">下載 DESIGN.md</button><button onclick="copyMd('skill')">複製 SKILL.md</button><button onclick="dl('skill')">下載 SKILL.md</button><button onclick="sharePng()">下載分享圖</button></div>
  <p class="muted" id="tok"></p><details><summary>預覽 DESIGN.md</summary><pre id="mdpre"></pre></details>
  <div class="nav"><button class="ghost" onclick="S.cat=0;go('pick')">回去修改</button></div></section>`,100);
- $("#mdpre").textContent=designMd(d);const all=designMd(d)+skillMd();$("#tok").textContent=`兩份檔案合計約 ${estTok(all).toLocaleString()} tokens，貼給任何 AI 都不吃記憶。`}
+ $("#mdpre").textContent=designMd(d);const all=designMd(d)+skillMd(d);const iss=checkConsistency(d,designMd(d),skillMd(d));if(iss.length)console.warn('taste-dna consistency',iss);$("#tok").textContent=`兩份檔案合計約 ${estTok(all).toLocaleString()} tokens，貼給任何 AI 都不吃記憶。`}
 function estTok(s){const cjk=(s.match(/[\u3000-\u9fff\uff00-\uffef]/g)||[]).length;const rest=s.replace(/[\u3000-\u9fff\uff00-\uffef]/g," ");return Math.round(cjk*1.1+rest.length/4)}
 function designMd(d){d=d||dna();const t=d.t,c=t.pal.c,dn=t.dens;
  const sp={N1:"區塊間距 96px，內距 48px，一屏只放 1 個重點",N2:"區塊間距 64px，內距 32px，一屏 2–3 個重點",N3:"區塊間距 48px，內距 24px，用欄線和小標分層，像雜誌",N4:"區塊間距 32px，內距 16px，一屏可放 6–8 個資訊塊，靠網格對齊"}[dn.id];
  const L=[`# DESIGN.md — 我的審美 DNA：${d.name}`,"",`> ${d.sum}`,"",`關鍵字：${d.kw.join("、")}｜氣質參考：${d.vb.map(x=>x.name+"（"+x.src+"）").join("、")}`,"",
  "## 1. 配色",`- 背景 ${c[0]}｜文字 ${c[1]}`,`- 主色 ${c[2]}（按鈕、重點）｜輔色 ${c[3]}｜強調 ${c[4]}（每畫面最多一處）`,`- 模式：${S.q.mode=="暗"?"暗色為主":S.q.mode=="亮"?"亮色為主":"亮暗皆可，維持同一組主色"}`,"",
  "## 2. 字體",`- 標題：${t.font.h}（粗 700，字級 40/32/24px，行高 1.2）`,`- 內文：${t.font.b}（400，16px，行高 1.7）`,"- 中文後備：Noto Sans TC／Noto Serif TC，全形標點，中英之間加半形空格","",
- "## 3. 細節數值",`- 圓角：${texLv("radius").name}（${t.r}px，大元素可 ×1.5）`,`- 陰影：${texLv("shadow").name}（${t.sh}）`,`- 線條：${texLv("line").name}（${t.ln}）`,`- 漸層：${t.gr.name}`,`- 間距基準 8px；${sp}`,"",
+ "## 3. 細節數值",`- 細節組合：${t.detail.name}（圓角、陰影、線條三者一起用，不要拆開混搭）`,`- 圓角：${t.r}px（大元素可 ×1.5）`,`- 陰影：${t.sh}`,`- 線條：${t.ln}`,`- 漸層：${t.gr.name}`,`- 間距基準 8px；${sp}`,"",
  `## 4. 版面密度：${dn.name}`,`- ${sp}`,"- 對齊靠網格，不要全部置中；只留一個視覺焦點",""];
  if(d.slides.length)L.push("## 5. 簡報",`- 偏好版型：${d.slides.map(s=>s.name).join("、")}`,"- 一頁一個訊息，標題寫結論，不寫主題","");
  if(d.socials.length)L.push(`## ${d.slides.length?6:5}. 社群圖文`,`- 偏好模式：${d.socials.map(s=>s.name).join("、")}`,"- 1080×1350，大標 3 秒內讀完，品牌色固定出現在同一位置","");
  L.push("## 地雷（不要做）",...d.dislikedV.map(x=>"- 風格："+x),...d.nopes.map(x=>"- "+x),"","## 設計靈感參考",`- 設計語言近似：${d.brands.map(b=>b.disp).join("、")}（只參考精神；不得使用其商標、標誌或照抄。品牌名稱屬各自所有者，與本檔無關聯）`,"","---","本檔由「審美 DNA」產生。資料來源皆為 MIT 授權：","- ui-ux-pro-max-skill © nextlevelbuilder — https://github.com/nextlevelbuilder/ui-ux-pro-max-skill","- taste-skill © Leonxlnx — https://github.com/Leonxlnx/taste-skill","- awesome-design-md © VoltAgent — https://github.com/VoltAgent/awesome-design-md","Permission is hereby granted, free of charge, to any person obtaining a copy of this software… (MIT License; full text in each repository.)");
  return L.join("\n")}
-function skillMd(){return `---
+function skillMd(d){d=d||dna();const t=d.t,n=S.nope||[],av=d.avoidTerms,hasV=id=>d.avoidVibes.some(x=>x.id==id);
+ const fontsUsed=[t.font.h,t.font.b],pureBW=t.pal.c.some(x=>/^#0{6}$/i.test(x))&&t.pal.c.some(x=>/^#f{6}$/i.test(x));
+ const hardSh=/ 0 #/.test(t.detail.sh),pill=t.detail.r>=20;
+ const alts=[["編輯式分欄","V12"],["便當格","V07"],["大字版面","V24"],["瑞士網格","V01"]].filter(([nm,id])=>!hasV(id)&&!av.includes(nm)&&!(nm=="便當格"&&SLIDES.some(x=>x.lay=="bento"&&S.votes[x.id]==-1))).map(x=>x[0]);
+ const DO=[],DONT=[];
+ DO.push("用 DESIGN.md 的色票 hex、字體、細節組合（圓角＋陰影＋線條）與間距，不要換成「差不多」的值。");
+ DO.push(`視覺方向以「${d.vb.map(x=>x.name).join("、")}」為準，關鍵字：${d.kw.join("、")}。`);
+ if(alts.length)DO.push(`首頁或封面可改用：${alts.join("、")}（依 DESIGN.md 挑一種）。`);
+ if(d.slides.length)DO.push(`簡報優先用：${d.slides.map(x=>x.name).join("、")}。`);
+ if(d.socials.length)DO.push(`社群圖優先用：${d.socials.map(x=>x.name).join("、")}。`);
+ DO.push(`標題 ${t.font.h}、內文 ${t.font.b}，標題和內文要有字重或字級對比。`);
+ DO.push(`細節統一用「${t.detail.name}」：${t.r}px 圓角、${t.sh=="none"?"不加陰影":"陰影 "+t.sh}、${t.ln=="none"?"不加邊框":"邊框 "+t.ln}。`);
+ DO.push("中文排版：全形標點、中英之間半形空格、行高 1.6–1.8、每行 15–30 字；間距用 8 的倍數。");
+ DO.push("一個畫面只有一個視覺焦點，強調色每畫面最多一處大面積。");
+ DONT.push(n.includes("ai-purple")?"絕對不用紫藍漸層、發光按鈕、霓虹光暈（我明確討厭）。":"不要預設用紫藍漸層、發光按鈕；只在 DESIGN.md 色票本身有這些顏色時才用。");
+ DONT.push(n.includes("center-all")?"不要全部置中（我明確討厭）。":"不要所有東西都置中；用網格和留白建立層次。");
+ DONT.push(n.includes("hero-3cards")?"絕對不要「置中大標＋三張功能卡」的制式首頁（我明確討厭）。":"避免「置中大標＋三張功能卡」的制式首頁。");
+ DONT.push(fontsUsed.includes("Inter")?"Inter 只用在 DESIGN.md 指定的位置，不要整份都換成 Inter 或系統字。":"不要全部改成 Inter 或系統字。");
+ if(n.includes("llm-serif"))DONT.push("不要用 Fraunces、Instrument Serif 這類 AI 預設展示襯線字。");
+ DONT.push(n.includes("emoji-icon")?"絕對不用 emoji 當圖示。":"不用 emoji 當圖示；圖示用同一套線條粗細。");
+ DONT.push("不要寫假數據、假評價、「釋放潛能」「重新定義」這類空話。");
+ DONT.push(pill?`圓角就用 DESIGN.md 的 ${t.r}px，不要每個元素各用一種圓角。`:"不要每個元素各用一種圓角，也不要全部套同一個大圓角。");
+ DONT.push(hardSh?"陰影只用 DESIGN.md 的硬邊位移陰影，不要混入柔和模糊陰影或外發光。":t.sh=="none"?"不加陰影、不加外發光。":"陰影只用 DESIGN.md 那一組，不用彩色陰影或外發光。");
+ DONT.push(pureBW&&!n.includes("pure-black")?"純黑 #000 和純白只在 DESIGN.md 色票指定的位置使用。":"不要純黑 #000 配純白；用帶色偏的深色與米白。");
+ if(n.includes("glass-everywhere"))DONT.push("不要毛玻璃卡片。");
+ if(n.includes("beige-brass"))DONT.push("不要米色底＋黃銅／赭紅的套版高級感配色。");
+ if(n.includes("stock-people"))DONT.push("不要假笑商務圖庫照片。");
+ DONT.push(n.includes("over-anim")?"不要進場動畫和滾動特效。":"動畫只用在有意義的地方，避免滿版進場動畫。");
+ if(d.avoidVibes.length)DONT.push(`不要做成這些風格：${d.avoidVibes.map(x=>x.name).join("、")}。`);
+ const badLay=[...SLIDES,...SOCIAL].filter(x=>S.votes[x.id]==-1).map(x=>x.name);if(badLay.length)DONT.push(`不要用這些版型：${badLay.join("、")}。`);
+ return `---
 name: taste-dna
-description: 依使用者的審美 DNA 產出設計（簡報、社群圖、網頁、圖像）。任何設計任務開始前使用。
+description: 依我的審美 DNA（${d.name}）產出設計（簡報、社群圖、網頁、圖像）。任何設計任務開始前使用。
 ---
 # taste-dna：照我的審美做
 
 ## 動手前
-1. 先讀專案裡的 DESIGN.md。那是我的審美，優先級高於你的預設偏好。
+1. 先讀專案裡的 DESIGN.md。那是我的審美，優先級高於你的預設偏好，也高於下面的通用規則。
 2. 沒有 DESIGN.md 就先問我要，不要自己猜一套。
-3. 用 DESIGN.md 的色票 hex、字體、圓角、陰影、間距數值，不要換成「差不多」的值。
 
-## 反模板規則（整理自 taste-skill）
-- 不用紫藍漸層、發光按鈕、隨機霓虹當預設。中性底色＋一個高對比強調色。
-- 不要所有東西都置中。用網格、不對稱和留白建立層次。
-- 不要「大標＋三張功能卡」的制式首頁；換成便當格、編輯式、分欄或大字版面。
-- 字體要有個性。不要全部 Inter；標題和內文要有對比（字重、字級或字族）。
-- 不用 emoji 當圖示；圖示用同一套線條粗細。
-- 不要寫假數據、假評價、「釋放潛能」「重新定義」這類空話。用具體、真實的內容。
-- 圓角、陰影只用 DESIGN.md 的那一組，不要每個元素都不一樣，也不要全部同一個大圓角。
-- 陰影要低調；除非 DESIGN.md 指定，不用彩色陰影或外發光。
-- 不要純黑 #000 配純白；用帶色偏的深色與米白。
-- 一個畫面只有一個視覺焦點，強調色每畫面最多出現一處大面積。
-- 動畫只用在有意義的地方，避免滿版進場動畫。
-- 中文排版：全形標點、中英之間半形空格、行高 1.6–1.8、每行 15–30 字。
-- 間距一律用 8 的倍數。
+## 要做
+${DO.map(x=>"- "+x).join("\n")}
+
+## 不要做
+${DONT.map(x=>"- "+x).join("\n")}
 
 ## 交付前自查
-- [ ] 色票、字體、數值都來自 DESIGN.md
-- [ ] 沒踩到 DESIGN.md 的「地雷」任何一條
+- [ ] 色票、字體、細節組合都來自 DESIGN.md
+- [ ] 沒踩到 DESIGN.md 的「地雷」和上面「不要做」任何一條
 - [ ] 換掉品牌名後，這份作品還認得出是我的風格，而不是 AI 預設樣板
 - [ ] 手機寬度 390px 下文字不溢出、不裁切
 
-來源：taste-skill（MIT, © Leonxlnx）的反模板規則，經整理與繁中化。`}
-function blob(k){const s=k=="design"?designMd():skillMd();return s}
+來源：taste-skill（MIT, © Leonxlnx）的反模板規則，依我的選擇整理與繁中化。`}
+function checkDNA(){const d=dna();return checkConsistency(d,designMd(d),skillMd(d))}
+function blob(k){const d=dna();return k=="design"?designMd(d):skillMd(d)}
 function copyMd(k){const s=blob(k);(navigator.clipboard?navigator.clipboard.writeText(s):Promise.reject()).then(()=>toast("已複製，貼給你的 AI 吧")).catch(()=>{const ta=document.createElement("textarea");ta.value=s;document.body.appendChild(ta);ta.select();document.execCommand("copy");ta.remove();toast("已複製")})}
 function dl(k){const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([blob(k)],{type:"text/markdown"}));a.download=k=="design"?"DESIGN.md":"SKILL.md";a.click()}
 function toast(m){const e=document.createElement("div");e.className="toast";e.textContent=m;document.body.appendChild(e);setTimeout(()=>e.remove(),2000)}
-async function sharePng(ret){const d=dna(),t=d.t,W=1080,H=1350,cv=document.createElement("canvas");cv.width=W;cv.height=H;const x=cv.getContext("2d");
+async function sharePng(ret){FONTMAP["Noto Sans TC 900"]="noto-sans-tc-900";await ensureFont("Noto Sans TC 900");const d=dna(),t=d.t,W=1080,H=1350,cv=document.createElement("canvas");cv.width=W;cv.height=H;const x=cv.getContext("2d");
  const sans="'Noto Sans TC',sans-serif",mono="'JetBrains Mono',monospace";
- await Promise.all([document.fonts.load(`900 100px ${t.hf}`,d.name),document.fonts.load(`700 30px ${sans}`,"審美"),document.fonts.load(`400 20px ${mono}`,"#0")]).catch(()=>{});await document.fonts.ready;
+ await Promise.all([ensureFontsIn(t.hf),ensureFont('JetBrains Mono')]);await Promise.all([document.fonts.load(`900 100px ${t.hf}`,d.name),document.fonts.load(`700 30px ${sans}`,"審美"),document.fonts.load(`400 20px ${mono}`,"#0")]).catch(()=>{});await document.fonts.ready;
  const bg=t.bg,fg=t.fg,dark=lumi(bg)<.5,M=88;
  x.fillStyle=bg;x.fillRect(0,0,W,H);
  let g=x.createRadialGradient(W-120,140,0,W-120,140,760);g.addColorStop(0,t.pr+(dark?"40":"26"));g.addColorStop(1,t.pr+"00");x.fillStyle=g;x.fillRect(0,0,W,H);
@@ -238,10 +280,13 @@ async function sharePng(ret){const d=dna(),t=d.t,W=1080,H=1350,cv=document.creat
  // title
  A(.65);x.font=`500 34px ${sans}`;x.fillText("我的審美 DNA 是",M,250);A(1);
  const parts=d.name.split("・");parts.forEach((l,k)=>{let s=128;x.font=`900 ${s}px ${t.hf}`;while(x.measureText(l).width>W-2*M&&s>60){s-=4;x.font=`900 ${s}px ${t.hf}`}x.fillStyle=k?t.pr:fg;x.fillText(l,M,390+k*150)});
- // DNA barcode
- const bx=M,by=700,bw=W-2*M,bh=120,n=DIMS.length,gap=10,w=(bw-gap*(n-1))/n,mx=Math.max(...d.v.map(Math.abs),1);
- d.v.forEach((y,k)=>{const h=Math.max(10,Math.abs(y)/mx*bh);x.fillStyle=t.pal.c[2+(k%3)];if(cr(x.fillStyle,bg)<1.6)x.fillStyle=fg;A(y>=0?1:.35);rr(x,bx+k*(w+gap),by+bh-h,w,h,w/2);x.fill()});A(1);
- A(.45);x.font=`400 18px ${mono}`;x.fillStyle=fg;x.fillText("15 個審美維度",bx,by+bh+34);x.textAlign="right";x.fillText(d.kw.map(k=>"#"+k).join("  "),W-M,by+bh+34);x.textAlign="left";A(1);
+ // DNA bars: centred baseline, each bar labelled with the pole it leans to
+ const SH={bright:["明亮","暗色"],sat:["鮮豔","低飽"],radius:["圓潤","直角"],serif:["襯線","無襯"],dense:["密集","留白"],contrast:["對比","柔和"],play:["玩味","沉穩"],lux:["精緻","親民"],tech:["科技","人文"],warm:["溫暖","冷靜"],bold:["大膽","克制"],retro:["復古","當代"],organic:["有機","幾何"],depth:["立體","扁平"],structure:["網格","隨性"]};
+ const bx=M,by=672,bw=W-2*M,bh=124,n=DIMS.length,gap=12,w=(bw-gap*(n-1))/n,mx=Math.max(...d.v.map(Math.abs),1),mid=by+bh/2;
+ x.fillStyle=fg;A(.2);x.fillRect(bx,mid-1,bw,2);A(1);
+ d.v.forEach((y,k)=>{const neu=Math.abs(y)<.5,h=Math.max(6,Math.abs(y)/mx*(bh/2-4));x.fillStyle=t.pal.c[2+(k%3)];if(cr(x.fillStyle,bg)<1.6)x.fillStyle=fg;A(neu?.3:1);rr(x,bx+k*(w+gap),y>=0?mid-h:mid,w,h,Math.min(w/2,8));x.fill();
+  A(neu?.35:.8);x.fillStyle=fg;x.font=`500 17px ${sans}`;x.textAlign="center";x.fillText(neu?"中性":SH[DIMS[k]][y>=0?0:1],bx+k*(w+gap)+w/2,by+bh+28);x.textAlign="left"});A(1);
+ A(.45);x.font=`400 18px ${mono}`;x.fillStyle=fg;x.fillText("15 個審美維度・每條下方的字＝你偏向的那一端",bx,by+bh+66);A(1);
  // summary
  x.fillStyle=fg;A(.85);x.font=`400 32px ${sans}`;wrap(x,d.sum,M,930,W-2*M,52,3);A(1);
  // palette strip
